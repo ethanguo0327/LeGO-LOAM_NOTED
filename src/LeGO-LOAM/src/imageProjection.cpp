@@ -181,22 +181,29 @@ public:
         // atan2(y,x)函数的返回值范围(-PI,PI],表示与复数x+yi的幅角
         // segMsg.startOrientation范围为(-PI,PI]
         // segMsg.endOrientation范围为(PI,3PI]
-        // 因为内部雷达旋转方向原因，所以atan2(..)函数前面需要加一个负号
+        // 因为，正常的-pi到pi是逆时针的，但velodyne是顺时针的，为了按照点生成顺序角度递增，加个符号使得-pi到pi是顺时针的
         segMsg.startOrientation = -atan2(laserCloudIn->points[0].y, laserCloudIn->points[0].x);
         // 下面这句话怀疑作者可能写错了，laserCloudIn->points.size() - 2应该是laserCloudIn->points.size() - 1
+        // 为啥加个2pi啊？两个作用：
+        // 1.loam认为雷达扫点的范围至少覆盖了半个圈
+        // 假设，起始点角度为-0.9pi
+        //      1.转了不止一整圈，如终点角度为-0.8pi，那么delta angle = -0.8pi - (-0.9pi)=0.1pi,显然不对，终点加个2pi可以解决：2.1pi
+        // 2.处理跨越零点带来的问题
+        //      2.转了不到一整圈，如终点角度为-0.99pi，那么delta angle = -0.99pi - (-0.9pi)=-0.09pi,显然不对，应该是另外一块圆弧，终点加个2pi可以解决：1.91pi
+        // 2pi的作用，跨零点时处理用于弥补跨零点问题，不跨零点时用于确保至少转了半圈。
         segMsg.endOrientation   = -atan2(laserCloudIn->points[laserCloudIn->points.size() - 1].y,
                                                      laserCloudIn->points[laserCloudIn->points.size() - 2].x) + 2 * M_PI;
-		// 开始和结束的角度差一般是多少？
-		// 一个velodyne 雷达数据包转过的角度多大？
-        // 雷达一般包含的是一圈的数据，所以角度差一般是2*PI，一个数据包转过360度
 
-		// segMsg.endOrientation - segMsg.startOrientation范围为(0,4PI)
-        // 如果角度差大于3Pi或小于Pi，说明角度差有问题，进行调整。
         if (segMsg.endOrientation - segMsg.startOrientation > 3 * M_PI) {
+        // 为什么减去2pi？
+        // loam认为，lidar点至多覆盖了一圈半，
+        // 上面+2pi的时候没做区分，正常情况下会无端多出2pi，因此要减掉
             segMsg.endOrientation -= 2 * M_PI;
         } else if (segMsg.endOrientation - segMsg.startOrientation < M_PI)
+        // 为什么又加了2pi？如果发生了跨零点问题，那么之前加的2pi被用于修复该问题了，那么如果还同时发生了看起来转了不到半圈的问题，那么还得再+2pi
+        // 例如：start：0.9pi，end：-0.9pi，跨零点的问题被上一个+2pi的步骤修复了：-0.9+2-0.9=0.2pi，但我们设定lidar至少转了半圈，说明其实是转了一圈单0.2pi
             segMsg.endOrientation += 2 * M_PI;
-		// segMsg.orientationDiff的范围为(PI,3PI),一圈大小为2PI，应该在2PI左右
+
         segMsg.orientationDiff = segMsg.endOrientation - segMsg.startOrientation;
     }
 
