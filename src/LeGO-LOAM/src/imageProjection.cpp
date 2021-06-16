@@ -229,39 +229,34 @@ public:
             if (rowIdn < 0 || rowIdn >= N_SCAN)
                 continue;
 
-            // atan2(y,x)函数的返回值范围(-PI,PI],表示与复数x+yi的幅角
+            // atan2(y,x)函数的返回值范围(-PI,PI]
             // 下方角度atan2(..)交换了x和y的位置，计算的是与y轴正方向的夹角大小(关于y=x做对称变换)
-            // 这里是在雷达坐标系，所以是与正前方的夹角大小
+            // 这里是在雷达坐标系，所以是与正前方的夹角大小？？？y朝前？
             horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
-
-			// round函数进行四舍五入取整
-			// 这边确定不是减去180度???  不是
-			// 雷达水平方向上某个角度和水平第几线的关联关系???关系如下：
-			// horizonAngle:(-PI,PI],columnIdn:[H/4,5H/4]-->[0,H] (H:Horizon_SCAN)
-			// 下面是把坐标系绕z轴旋转,对columnIdn进行线性变换
-			// x+==>Horizon_SCAN/2,x-==>Horizon_SCAN
-			// y+==>Horizon_SCAN*3/4,y-==>Horizon_SCAN*5/4,Horizon_SCAN/4
-            //
-            //          3/4*H
+            
+            //根据水平角度算水平index，x负轴是第0个，顺时针递增（velodyne也正好是顺时针转的）
+            //(horizonAngle-90.0)/ang_res_x:
+            //          1/4*H
             //          | y+
-            //          |
-            // (x-)H---------->H/2 (x+)
-            //          |
+            //    H/2   |     +0
+            // (x-)----------> 
+            //   -H/2   |     -0  
             //          | y-
-            //    5/4*H   H/4
+            //         -H/4
+            //
+            //-(horizonAngle-90.0)/ang_res_x + H/2:
+            //          1/4*H
+            //          | y+
+            //     0    |
+            // (x-)---------->H/2 (x+)
+            //     H    |
+            //          | y-
+            //         3/4*H
             //
             columnIdn = -round((horizonAngle-90.0)/ang_res_x) + Horizon_SCAN/2;
             if (columnIdn >= Horizon_SCAN)
                 columnIdn -= Horizon_SCAN;
-            // 经过上面columnIdn -= Horizon_SCAN的变换后的columnIdn分布：
-            //          3/4*H
-            //          | y+
-            //     H    |
-            // (x-)---------->H/2 (x+)
-            //     0    |
-            //          | y-
-            //         H/4
-            //
+
             if (columnIdn < 0 || columnIdn >= Horizon_SCAN)
                 continue;
 
@@ -269,6 +264,7 @@ public:
             rangeMat.at<float>(rowIdn, columnIdn) = range;
 
 			// columnIdn:[0,H] (H:Horizon_SCAN)==>[0,1800]
+            // ???
             thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
 
             index = columnIdn  + rowIdn * Horizon_SCAN;
