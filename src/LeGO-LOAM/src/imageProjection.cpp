@@ -263,10 +263,9 @@ public:
             range = sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y + thisPoint.z * thisPoint.z);
             rangeMat.at<float>(rowIdn, columnIdn) = range;
 
-			// columnIdn:[0,H] (H:Horizon_SCAN)==>[0,1800]
             // ???
             thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
-
+            // 按行存储
             index = columnIdn  + rowIdn * Horizon_SCAN;
             fullCloud->points[index] = thisPoint;
 
@@ -286,8 +285,6 @@ public:
                 lowerInd = j + ( i )*Horizon_SCAN;
                 upperInd = j + (i+1)*Horizon_SCAN;
 
-                // 初始化的时候用nanPoint.intensity = -1 填充
-                // 都是-1 证明是空点nanPoint
                 if (fullCloud->points[lowerInd].intensity == -1 ||
                     fullCloud->points[upperInd].intensity == -1){
                     groundMat.at<int8_t>(i,j) = -1;
@@ -398,12 +395,12 @@ public:
             }
         }
     }
-
+    //给某个点打标签
     void labelComponents(int row, int col){
         float d1, d2, alpha, angle;
         int fromIndX, fromIndY, thisIndX, thisIndY; 
         bool lineCountFlag[N_SCAN] = {false};
-
+        //x是纵轴
         queueIndX[0] = row;
         queueIndY[0] = col;
         int queueSize = 1;
@@ -435,7 +432,7 @@ public:
                 if (thisIndX < 0 || thisIndX >= N_SCAN)
                     continue;
 
-                // 是个环状的图片，左右连通
+                // 因为激光是转了一圈的，所以可以认为图片是个环状的图片，左右连通
                 if (thisIndY < 0)
                     thisIndY = Horizon_SCAN - 1;
                 if (thisIndY >= Horizon_SCAN)
@@ -461,23 +458,25 @@ public:
                 else
                     alpha = segmentAlphaY;
 
-				// 通过下面的公式计算这两点之间是否有平面特征
-				// atan2(y,x)的值越大，d1，d2之间的差距越小,越平坦
+				// 通过下面的公式统计连续的点，原理是计算相邻两个点和激光原点组成的三角形的长边与底边夹角，太大或者太小说明它是个噪点（跟laser filter原理类似）
+                // 长边和底边的夹角
                 angle = atan2(d2*sin(alpha), (d1 -d2*cos(alpha)));
 
                 if (angle > segmentTheta){
-					// segmentTheta=1.0472<==>60度
-					// 如果算出角度大于60度，则假设这是个平面
+                    // 继续往外蔓延
                     queueIndX[queueEndInd] = thisIndX;
                     queueIndY[queueEndInd] = thisIndY;
                     ++queueSize;
+                    //下一次在插入数据时放置的位置（用std::vector然后push_back不就好了）
                     ++queueEndInd;
 
                     labelMat.at<int>(thisIndX, thisIndY) = labelCount;
+                    //这个点所在的类在竖直方向上染指了哪些scan
                     lineCountFlag[thisIndX] = true;
-
+                    // 目前为止所有被查看过的点
                     allPushedIndX[allPushedIndSize] = thisIndX;
                     allPushedIndY[allPushedIndSize] = thisIndY;
+                    // 这个点蔓延开之后波及的点总数
                     ++allPushedIndSize;
                 }
             }
@@ -490,18 +489,17 @@ public:
         if (allPushedIndSize >= 30)
             feasibleSegment = true;
         else if (allPushedIndSize >= segmentValidPointNum){
-			// 如果聚类点数小于30大于等于5，统计竖直方向上的聚类点数
+			// 虽然总点数比较少，但如果在数值方向上染指的scan数量比较多，超过了三根线，那么也认为是有效聚类
             int lineCount = 0;
             for (size_t i = 0; i < N_SCAN; ++i)
                 if (lineCountFlag[i] == true)
                     ++lineCount;
-
-			// 竖直方向上超过3个也将它标记为有效聚类
             if (lineCount >= segmentValidLineNum)
                 feasibleSegment = true;            
         }
 
         if (feasibleSegment == true){
+            //一个类一个标签
             ++labelCount;
         }else{
             for (size_t i = 0; i < allPushedIndSize; ++i){
