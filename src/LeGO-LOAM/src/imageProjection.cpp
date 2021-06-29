@@ -343,17 +343,16 @@ public:
 			// segMsg.startRingIndex[i]
 			// segMsg.endRingIndex[i]
 			// 表示第i线的点云起始序列和终止序列
-			// 以开始线后的第6线为开始，以结束线前的第6线为结束
+			// 以开始线后的第6线为开始，以结束线前的第6线为结束 ???
             segMsg.startRingIndex[i] = sizeOfSegCloud-1 + 5;
 
             for (size_t j = 0; j < Horizon_SCAN; ++j) {
 				// 找到可用的特征点或者地面点(不选择labelMat[i][j]=0的点)
                 if (labelMat.at<int>(i,j) > 0 || groundMat.at<int8_t>(i,j) == 1){
 					// labelMat数值为999999表示这个点是因为聚类数量不够30而被舍弃的点
-					// 需要舍弃的点直接continue跳过本次循环，
-					// 当列数为5的倍数，并且行数较大，可以认为非地面点的，将它保存进异常点云(界外点云)中
-					// 然后再跳过本次循环
                     if (labelMat.at<int>(i,j) == 999999){
+                        //非地面点，且列为5的倍数，将它保存进异常点云(界外点云)中
+                        //为什么单单保留列为5的倍数的点？猜测是想降采样地保留下来聚类不够的那些点
                         if (i > groundScanInd && j % 5 == 0){
                             outlierCloud->push_back(fullCloud->points[j + i*Horizon_SCAN]);
                             continue;
@@ -362,7 +361,7 @@ public:
                         }
                     }
                     
-					// 如果是地面点,对于列数不为5的倍数的，直接跳过不处理
+					// 如果是地面点,对于列数不为5的倍数的，直接跳过不处理 为什么单独保留列为5的倍数的？猜测是降采样地保留下来部分
                     if (groundMat.at<int8_t>(i,j) == 1){
                         if (j%5!=0 && j>5 && j<Horizon_SCAN-5)
                             continue;

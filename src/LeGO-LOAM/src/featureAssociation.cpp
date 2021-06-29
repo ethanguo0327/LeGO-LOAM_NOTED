@@ -594,21 +594,23 @@ public:
                     ori -= 2 * M_PI;
             }
 
-            // 用 point.intensity 来保存时间
+            // 用 point.intensity 来保存时间 ???
             float relTime = (ori - segInfo.startOrientation) / segInfo.orientationDiff;
             point.intensity = int(segmentedCloud->points[i].intensity) + scanPeriod * relTime;
 
             if (imuPointerLast >= 0) {
                 float pointTime = relTime * scanPeriod;
+                // imuPointerFront:激光时间戳之后的第一个imu数据的索引
                 imuPointerFront = imuPointerLastIteration;
                 // while循环内进行时间轴对齐
                 while (imuPointerFront != imuPointerLast) {
+                    //找到第一个比scan晚的数据
                     if (timeScanCur + pointTime < imuTime[imuPointerFront]) {
                         break;
                     }
                     imuPointerFront = (imuPointerFront + 1) % imuQueLength;
                 }
-
+                //找遍imu数据也没找到在scan时间之后的
                 if (timeScanCur + pointTime > imuTime[imuPointerFront]) {
                     // 该条件内imu数据比激光数据早，但是没有更后面的数据
                     // (打个比方,激光在9点时出现，imu现在只有8点的)
@@ -625,9 +627,9 @@ public:
                     imuShiftYCur = imuShiftY[imuPointerFront];
                     imuShiftZCur = imuShiftZ[imuPointerFront];   
                 } else {
-                    // 在imu数据充足的情况下可以进行插补
-                    // 当前timeScanCur + pointTime < imuTime[imuPointerFront]，
-                    // 而且imuPointerFront是最早一个时间大于timeScanCur + pointTime的imu数据指针
+                    //在激光时间戳处插值得到imu的角度
+                    //按照imuPointerFront - 1理解就好了，加个imuQueLength是为了防止越界，往前找，超过第一个直接去找最后一个
+                    // ???减一个就一定比scan时间戳早吗
                     int imuPointerBack = (imuPointerFront + imuQueLength - 1) % imuQueLength;
                     float ratioFront = (timeScanCur + pointTime - imuTime[imuPointerBack]) 
                                                      / (imuTime[imuPointerFront] - imuTime[imuPointerBack]);
@@ -637,6 +639,7 @@ public:
                     // 通过上面计算的ratioFront以及ratioBack进行插补
                     // 因为imuRollCur和imuPitchCur通常都在0度左右，变化不会很大，因此不需要考虑超过2M_PI的情况
                     // imuYaw转的角度比较大，需要考虑超过2*M_PI的情况
+                    // 其实用四元数然后slerp不就好了，非得用rpy
                     imuRollCur = imuRoll[imuPointerFront] * ratioFront + imuRoll[imuPointerBack] * ratioBack;
                     imuPitchCur = imuPitch[imuPointerFront] * ratioFront + imuPitch[imuPointerBack] * ratioBack;
                     if (imuYaw[imuPointerFront] - imuYaw[imuPointerBack] > M_PI) {
@@ -660,7 +663,7 @@ public:
 
                 if (i == 0) {
                     // 此处更新过的角度值主要用在updateImuRollPitchYawStartSinCos()中,
-                    // 更新每个角的正余弦值
+                    // 每一帧其实时刻对应的imu角度
                     imuRollStart = imuRollCur;
                     imuPitchStart = imuPitchCur;
                     imuYawStart = imuYawCur;
