@@ -84,6 +84,7 @@ private:
     int cloudLabel[N_SCAN*Horizon_SCAN];
 
     int imuPointerFront;
+    //最后一个imu数据（最新的imu数据）
     int imuPointerLast;
     int imuPointerLastIteration;
 
@@ -103,28 +104,28 @@ private:
     float imuAngularRotationXCur, imuAngularRotationYCur, imuAngularRotationZCur;
     float imuAngularRotationXLast, imuAngularRotationYLast, imuAngularRotationZLast;
     float imuAngularFromStartX, imuAngularFromStartY, imuAngularFromStartZ;
-
+    //直接接收到的imu测量角度
     double imuTime[imuQueLength];
     float imuRoll[imuQueLength];
     float imuPitch[imuQueLength];
     float imuYaw[imuQueLength];
-
+    //直接接收到的imu测量的加速度去除重力影响
     float imuAccX[imuQueLength];
     float imuAccY[imuQueLength];
     float imuAccZ[imuQueLength];
-
+    //世界坐标系下使用重力影响去除后的加速度累积的角速度
     float imuVeloX[imuQueLength];
     float imuVeloY[imuQueLength];
     float imuVeloZ[imuQueLength];
-
+    //世界坐标系下累积的位移
     float imuShiftX[imuQueLength];
     float imuShiftY[imuQueLength];
     float imuShiftZ[imuQueLength];
-
+    //直接接收到的imu角速度
     float imuAngularVeloX[imuQueLength];
     float imuAngularVeloY[imuQueLength];
     float imuAngularVeloZ[imuQueLength];
-
+    //???
     float imuAngularRotationX[imuQueLength];
     float imuAngularRotationY[imuQueLength];
     float imuAngularRotationZ[imuQueLength];
@@ -373,45 +374,20 @@ public:
     // 该函数的功能是把点云坐标变换到初始imu时刻
     void TransformToStartIMU(PointType *p)
     {
-        // 因为在adjustDistortion函数中有对xyz的坐标进行交换的过程
-        // 交换的过程是x=原来的y，y=原来的z，z=原来的x
-        // 所以下面其实是绕Z轴(原先的x轴)旋转，对应的是roll角
-        //
-        //     |cosrz  -sinrz  0|
-        //  Rz=|sinrz  cosrz   0|
-        //     |0       0      1|
-        // [x1,y1,z1]^T=Rz*[x,y,z]
-        //
-        // 因为在imuHandler中进行过坐标变换，
-        // 所以下面的roll其实已经对应于新坐标系中(X-Y-Z)的yaw
+        //先把激光点坐标从雷达坐标系转换到世界坐标系
         float x1 = cos(imuRollCur) * p->x - sin(imuRollCur) * p->y;
         float y1 = sin(imuRollCur) * p->x + cos(imuRollCur) * p->y;
         float z1 = p->z;
 
-        // 绕X轴(原先的y轴)旋转
-        // 
-        // [x2,y2,z2]^T=Rx*[x1,y1,z1]
-        //    |1     0        0|
-        // Rx=|0   cosrx -sinrx|
-        //    |0   sinrx  cosrx|
         float x2 = x1;
         float y2 = cos(imuPitchCur) * y1 - sin(imuPitchCur) * z1;
         float z2 = sin(imuPitchCur) * y1 + cos(imuPitchCur) * z1;
 
-        // 最后再绕Y轴(原先的Z轴)旋转
-        //    |cosry   0   sinry|
-        // Ry=|0       1       0|
-        //    |-sinry  0   cosry|
         float x3 = cos(imuYawCur) * x2 + sin(imuYawCur) * z2;
         float y3 = y2;
         float z3 = -sin(imuYawCur) * x2 + cos(imuYawCur) * z2;
 
-        // 下面部分的代码功能是从imu坐标的原点变换到i=0时imu的初始时刻(从世界坐标系变换到start坐标系)
-        // 变换方式和函数VeloToStartIMU()中的类似
-        // 变换顺序：Cur-->世界坐标系-->Start，这两次变换中，
-        // 前一次是正变换，角度为正，后一次是逆变换，角度应该为负
-        // 可以参考：
-        // https://blog.csdn.net/wykxwyc/article/details/101712524
+        //再从世界坐标系转换到起始时刻的雷达坐标系
         float x4 = cosImuYawStart * x3 - sinImuYawStart * z3;
         float y4 = y3;
         float z4 = sinImuYawStart * x3 + cosImuYawStart * z3;
@@ -420,9 +396,7 @@ public:
         float y5 = cosImuPitchStart * y4 + sinImuPitchStart * z4;
         float z5 = -sinImuPitchStart * y4 + cosImuPitchStart * z4;
 
-        // 绕z轴(原先的x轴)变换角度到初始imu时刻，另外需要加上imu的位移漂移
-        // 后面加上的 imuShiftFromStart.. 表示从start时刻到cur时刻的漂移，
-        // (imuShiftFromStart.. 在start坐标系下)
+
         p->x = cosImuRollStart * x5 + sinImuRollStart * y5 + imuShiftFromStartXCur;
         p->y = -sinImuRollStart * x5 + cosImuRollStart * y5 + imuShiftFromStartYCur;
         p->z = z5 + imuShiftFromStartZCur;
@@ -473,7 +447,7 @@ public:
         accY = y2;
         accZ = -sin(yaw) * x2 + cos(yaw) * z2;
 
-        // 进行位移，速度，角度量的累加
+        // 进行世界坐标系下位移，速度，???的累加
         int imuPointerBack = (imuPointerLast + imuQueLength - 1) % imuQueLength;
         double timeDiff = imuTime[imuPointerLast] - imuTime[imuPointerBack];
         if (timeDiff < scanPeriod) {
@@ -519,7 +493,7 @@ public:
         imuAngularVeloX[imuPointerLast] = imuIn->angular_velocity.x;
         imuAngularVeloY[imuPointerLast] = imuIn->angular_velocity.y;
         imuAngularVeloZ[imuPointerLast] = imuIn->angular_velocity.z;
-
+        // 进行世界坐标系下位移，速度，???的累加
         AccumulateIMUShiftAndRotation();
     }
 
@@ -629,7 +603,7 @@ public:
                 } else {
                     //在激光时间戳处插值得到imu的角度
                     //按照imuPointerFront - 1理解就好了，加个imuQueLength是为了防止越界，往前找，超过第一个直接去找最后一个
-                    // ???减一个就一定比scan时间戳早吗
+                    // ???前面一个就一定比scan时间戳早吗
                     int imuPointerBack = (imuPointerFront + imuQueLength - 1) % imuQueLength;
                     float ratioFront = (timeScanCur + pointTime - imuTime[imuPointerBack]) 
                                                      / (imuTime[imuPointerFront] - imuTime[imuPointerBack]);
@@ -640,6 +614,7 @@ public:
                     // 因为imuRollCur和imuPitchCur通常都在0度左右，变化不会很大，因此不需要考虑超过2M_PI的情况
                     // imuYaw转的角度比较大，需要考虑超过2*M_PI的情况
                     // 其实用四元数然后slerp不就好了，非得用rpy
+                    // ???为什么这样插值
                     imuRollCur = imuRoll[imuPointerFront] * ratioFront + imuRoll[imuPointerBack] * ratioBack;
                     imuPitchCur = imuPitch[imuPointerFront] * ratioFront + imuPitch[imuPointerBack] * ratioBack;
                     if (imuYaw[imuPointerFront] - imuYaw[imuPointerBack] > M_PI) {
@@ -663,7 +638,7 @@ public:
 
                 if (i == 0) {
                     // 此处更新过的角度值主要用在updateImuRollPitchYawStartSinCos()中,
-                    // 每一帧其实时刻对应的imu角度
+                    // 每一帧起始时刻对应的imu角度
                     imuRollStart = imuRollCur;
                     imuPitchStart = imuPitchCur;
                     imuYawStart = imuYawCur;
@@ -677,7 +652,7 @@ public:
                     imuShiftZStart = imuShiftZCur;
 
                     if (timeScanCur + pointTime > imuTime[imuPointerFront]) {
-                        // 该条件内imu数据比激光数据早，但是没有更后面的数据
+                        // 激光后面没有imu数据
                         imuAngularRotationXCur = imuAngularRotationX[imuPointerFront];
                         imuAngularRotationYCur = imuAngularRotationY[imuPointerFront];
                         imuAngularRotationZCur = imuAngularRotationZ[imuPointerFront];
@@ -688,6 +663,7 @@ public:
                                                          / (imuTime[imuPointerFront] - imuTime[imuPointerBack]);
                         float ratioBack = (imuTime[imuPointerFront] - timeScanCur - pointTime) 
                                                         / (imuTime[imuPointerFront] - imuTime[imuPointerBack]);
+                        //Rotation是个什么鬼?答：imu从初始时刻开始的累积旋转量
                         imuAngularRotationXCur = imuAngularRotationX[imuPointerFront] * ratioFront + imuAngularRotationX[imuPointerBack] * ratioBack;
                         imuAngularRotationYCur = imuAngularRotationY[imuPointerFront] * ratioFront + imuAngularRotationY[imuPointerBack] * ratioBack;
                         imuAngularRotationZCur = imuAngularRotationZ[imuPointerFront] * ratioFront + imuAngularRotationZ[imuPointerBack] * ratioBack;
@@ -705,7 +681,7 @@ public:
                     // 这里更新的是i=0时刻的rpy角，后面将速度坐标投影过来会用到i=0时刻的值
                     updateImuRollPitchYawStartSinCos();
                 } else {
-                    // 速度投影到初始i=0时刻
+                    // 计算世界坐标系下机体相对于初始时刻的速度增长量,得到imuVeloFromStartXCur 不过好像并没用
                     VeloToStartIMU();
 					// 将点的坐标变换到初始i=0时刻
                     TransformToStartIMU(&point);
