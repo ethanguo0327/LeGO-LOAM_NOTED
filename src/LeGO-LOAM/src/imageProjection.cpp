@@ -53,13 +53,13 @@ private:
     pcl::PointCloud<PointType>::Ptr groundCloud;
     pcl::PointCloud<PointType>::Ptr segmentedCloud;
     pcl::PointCloud<PointType>::Ptr segmentedCloudPure;
-    pcl::PointCloud<PointType>::Ptr outlierCloud;
+    pcl::PointCloud<PointType>::Ptr outlierCloud;//不是地面点，也不属于某种类，那么降采样地存储到这里面来
 
     PointType nanPoint;
 
-    cv::Mat rangeMat;
-    cv::Mat labelMat;
-    cv::Mat groundMat;
+    cv::Mat rangeMat;//长度矩阵
+    cv::Mat labelMat;//点标签矩阵
+    cv::Mat groundMat;//地面标记矩阵
     int labelCount;
 
     float startOrientation;
@@ -81,8 +81,9 @@ public:
         nh("~"){
         // 订阅来自velodyne雷达驱动的topic ("/velodyne_points")
         subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>("/velodyne_points", 1, &ImageProjection::cloudHandler, this);
-        
+        //FullCloud里面的intensity存储的是col和row的index
         pubFullCloud = nh.advertise<sensor_msgs::PointCloud2> ("/full_cloud_projected", 1);
+        //FullInfoCloud里面的intensity存储的是range
         pubFullInfoCloud = nh.advertise<sensor_msgs::PointCloud2> ("/full_cloud_info", 1);
 
         pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
@@ -263,12 +264,12 @@ public:
             range = sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y + thisPoint.z * thisPoint.z);
             rangeMat.at<float>(rowIdn, columnIdn) = range;
 
-            // ???
+            // fullCloud的intensity整数部分存rowIdn,小数部分存columnIdn
             thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
             // 按行存储
             index = columnIdn  + rowIdn * Horizon_SCAN;
             fullCloud->points[index] = thisPoint;
-
+            // intensity直接存了个长度
             fullInfoCloud->points[index].intensity = range;
         }
     }
@@ -330,6 +331,7 @@ public:
     }
 
     void cloudSegmentation(){
+        //给所有点打标签
         for (size_t i = 0; i < N_SCAN; ++i)
             for (size_t j = 0; j < Horizon_SCAN; ++j)
 				// 如果labelMat[i][j]=0,表示没有对该点进行过分类
@@ -343,11 +345,11 @@ public:
 			// segMsg.startRingIndex[i]
 			// segMsg.endRingIndex[i]
 			// 表示第i线的点云起始序列和终止序列
-			// 以开始线后的第6线为开始，以结束线前的第6线为结束 ???
+			// sizeOfSegCloud:一条scan中被选中的点的个数
             segMsg.startRingIndex[i] = sizeOfSegCloud-1 + 5;
 
             for (size_t j = 0; j < Horizon_SCAN; ++j) {
-				// 找到可用的特征点或者地面点(不选择labelMat[i][j]=0的点)
+				// 找到可用的特征点或者地面点
                 if (labelMat.at<int>(i,j) > 0 || groundMat.at<int8_t>(i,j) == 1){
 					// labelMat数值为999999表示这个点是因为聚类数量不够30而被舍弃的点
                     if (labelMat.at<int>(i,j) == 999999){
@@ -371,12 +373,13 @@ public:
                     segMsg.segmentedCloudGroundFlag[sizeOfSegCloud] = (groundMat.at<int8_t>(i,j) == 1);
                     segMsg.segmentedCloudColInd[sizeOfSegCloud] = j;
                     segMsg.segmentedCloudRange[sizeOfSegCloud]  = rangeMat.at<float>(i,j);
+                    //聚类的点和稀疏的地面点
                     segmentedCloud->push_back(fullCloud->points[j + i*Horizon_SCAN]);
                     ++sizeOfSegCloud;
                 }
             }
 
-            // 以结束线前的第5线为结束
+            // sizeOfSegCloud:一条scan中被选中的点的个数
             segMsg.endRingIndex[i] = sizeOfSegCloud-1 - 5;
         }
 
@@ -388,6 +391,7 @@ public:
 					// 需要选择不是地面点(labelMat[i][j]!=-1)和没被舍弃的点
                     if (labelMat.at<int>(i,j) > 0 && labelMat.at<int>(i,j) != 999999){
                         segmentedCloudPure->push_back(fullCloud->points[j + i*Horizon_SCAN]);
+                        //intensity 存储标签
                         segmentedCloudPure->points.back().intensity = labelMat.at<int>(i,j);
                     }
                 }
@@ -488,7 +492,7 @@ public:
         if (allPushedIndSize >= 30)
             feasibleSegment = true;
         else if (allPushedIndSize >= segmentValidPointNum){
-			// 虽然总点数比较少，但如果在数值方向上染指的scan数量比较多，超过了三根线，那么也认为是有效聚类
+			// 虽然总点数比较少，但如果在竖直方向上染指的scan数量比较多，超过了三根线，那么也认为是有效聚类
             int lineCount = 0;
             for (size_t i = 0; i < N_SCAN; ++i)
                 if (lineCountFlag[i] == true)

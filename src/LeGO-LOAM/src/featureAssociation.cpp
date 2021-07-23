@@ -78,10 +78,10 @@ private:
     int systemInitCount;
     bool systemInited;
 
-    std::vector<smoothness_t> cloudSmoothness;
-    float cloudCurvature[N_SCAN*Horizon_SCAN];
-    int cloudNeighborPicked[N_SCAN*Horizon_SCAN];
-    int cloudLabel[N_SCAN*Horizon_SCAN];
+    std::vector<smoothness_t> cloudSmoothness;//点的曲率以及index
+    float cloudCurvature[N_SCAN*Horizon_SCAN];//点的曲率
+    int cloudNeighborPicked[N_SCAN*Horizon_SCAN];//视角动一动就可能看不到的点
+    int cloudLabel[N_SCAN*Horizon_SCAN];//点所属聚类的标签
 
     int imuPointerFront;
     //最后一个imu数据（最新的imu数据）
@@ -152,7 +152,7 @@ private:
     float pointSearchSurfInd2[N_SCAN*Horizon_SCAN];
     float pointSearchSurfInd3[N_SCAN*Horizon_SCAN];
 
-    float transformCur[6];
+    float transformCur[6];//InitialGuess
     float transformSum[6];
 
     float imuRollLast, imuPitchLast, imuYawLast;
@@ -170,7 +170,7 @@ private:
     std::vector<int> pointSearchInd;
     std::vector<float> pointSearchSqDis;
 
-    PointType pointOri, pointSel, tripod1, tripod2, tripod3, pointProj, coeff;
+    PointType pointOri, pointSel/*当前点*/, tripod1, tripod2, tripod3, pointProj, coeff;
 
     nav_msgs::Odometry laserOdometry;
 
@@ -570,6 +570,7 @@ public:
 
             // 用 point.intensity 来保存时间 ???
             float relTime = (ori - segInfo.startOrientation) / segInfo.orientationDiff;
+            // intensity = rowInd + relative time
             point.intensity = int(segmentedCloud->points[i].intensity) + scanPeriod * relTime;
 
             if (imuPointerLast >= 0) {
@@ -669,7 +670,7 @@ public:
                         imuAngularRotationZCur = imuAngularRotationZ[imuPointerFront] * ratioFront + imuAngularRotationZ[imuPointerBack] * ratioBack;
                     }
 
-                    // 距离上一次插补，旋转过的角度变化值
+                    // 距离上一次插补，旋转过的角度变化值。当遍历到最后一点时，那么它也是第二帧激光初始位置。
                     imuAngularFromStartX = imuAngularRotationXCur - imuAngularRotationXLast;
                     imuAngularFromStartY = imuAngularRotationYCur - imuAngularRotationYLast;
                     imuAngularFromStartZ = imuAngularRotationZCur - imuAngularRotationZLast;
@@ -693,7 +694,7 @@ public:
         imuPointerLastIteration = imuPointerLast;
     }
 
-    // 计算光滑性，这里的计算没有完全按照公式进行，
+    // 计算曲率，这里的计算没有完全按照公式进行，
     // 缺少除以总点数i和r[i]
     void calculateSmoothness()
     {
@@ -721,8 +722,7 @@ public:
         }
     }
 
-    // 阻塞点是哪种点?
-    // 阻塞点指点云之间相互遮挡，而且又靠得很近的点
+    // 阻塞点是哪种点?那种视角动一动就可能看不到的点，被墙角挡到的那种
     void markOccludedPoints()
     {
         int cloudSize = segmentedCloud->points.size();
@@ -733,9 +733,11 @@ public:
             float depth2 = segInfo.segmentedCloudRange[i+1];
             int columnDiff = std::abs(int(segInfo.segmentedCloudColInd[i+1] - segInfo.segmentedCloudColInd[i]));
 
+            //如果两点发射角相差不大，但测距值差距较大
+            //为什么标记这些点？因为这些点属于那种视角动一动就可能看不到的点
             if (columnDiff < 10){
 
-                // 选择距离较远的那些点，并将他们标记为1
+                // 视角动一动就可能看不到的点，将他们标记为1
                 if (depth1 - depth2 > 0.3){
                     cloudNeighborPicked[i - 5] = 1;
                     cloudNeighborPicked[i - 4] = 1;
@@ -775,10 +777,10 @@ public:
 
             for (int j = 0; j < 6; j++) {
 
-                // sp和ep的含义是什么???startPointer,endPointer?
+                // sp和ep的含义是什么?其实相当于一个滑动窗口
                 int sp = (segInfo.startRingIndex[i] * (6 - j)    + segInfo.endRingIndex[i] * j) / 6;
                 int ep = (segInfo.startRingIndex[i] * (5 - j)    + segInfo.endRingIndex[i] * (j + 1)) / 6 - 1;
-
+                // 当窗口起点+滑动距离超过终点时，就不滑了
                 if (sp >= ep)
                     continue;
 
@@ -790,27 +792,26 @@ public:
                     // 每次ind的值就是等于k??? 有什么意义?
                     // 因为上面对cloudSmoothness进行了一次从小到大排序，所以ind不一定等于k了
                     int ind = cloudSmoothness[k].ind;
+                    //不是可能被遮挡的点，曲率够大，也不是地面点
                     if (cloudNeighborPicked[ind] == 0 &&
                         cloudCurvature[ind] > edgeThreshold &&
                         segInfo.segmentedCloudGroundFlag[ind] == false) {
                     
                         largestPickedNum++;
+                        //选曲率最大的两个点放入sharp，最大的20个点放入less sharp
                         if (largestPickedNum <= 2) {
-                            // 论文中nFe=2,cloudSmoothness已经按照从小到大的顺序排列，
-                            // 所以这边只要选择最后两个放进队列即可
                             // cornerPointsSharp标记为2
                             cloudLabel[ind] = 2;
                             cornerPointsSharp->push_back(segmentedCloud->points[ind]);
                             cornerPointsLessSharp->push_back(segmentedCloud->points[ind]);
                         } else if (largestPickedNum <= 20) {
-							// 塞20个点到cornerPointsLessSharp中去
 							// cornerPointsLessSharp标记为1
                             cloudLabel[ind] = 1;
                             cornerPointsLessSharp->push_back(segmentedCloud->points[ind]);
                         } else {
                             break;
                         }
-
+                        //前后五个点都不要了
                         cloudNeighborPicked[ind] = 1;
                         for (int l = 1; l <= 5; l++) {
                             // 从ind+l开始后面5个点，每个点index之间的差值，
@@ -846,7 +847,7 @@ public:
                         if (smallestPickedNum >= 4) {
                             break;
                         }
-
+                        //前后五个点都不要了
                         cloudNeighborPicked[ind] = 1;
                         for (int l = 1; l <= 5; l++) {
                             // 从前面往后判断是否是需要的邻接点，是的话就进行标记
@@ -1259,17 +1260,18 @@ public:
         int surfPointsFlatNum = surfPointsFlat->points.size();
 
         for (int i = 0; i < surfPointsFlatNum; i++) {
-            // 坐标变换到开始时刻，参数0是输入，参数1是输出
+            // 将点的坐标转换到初始时刻坐标系中去
             TransformToStart(&surfPointsFlat->points[i], &pointSel);
 
             if (iterCount % 5 == 0) {
 
-                // k点最近邻搜索，这里k=1
+                // 最近邻搜索k个点，这里k=1
                 kdtreeSurfLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
                 int closestPointInd = -1, minPointInd2 = -1, minPointInd3 = -1;
 
                 // sq:平方，距离的平方值
                 // 如果nearestKSearch找到的1(k=1)个邻近点满足条件
+                // nearestFeatureSearchSqDist设置的25，这么鸟远???
                 if (pointSearchSqDis[0] < nearestFeatureSearchSqDist) {
                     closestPointInd = pointSearchInd[0];
 					
@@ -1792,9 +1794,7 @@ public:
         imuVeloFromStartZ = imuVeloFromStartZCur;
 
         // 关于下面负号的说明：
-        // transformCur是在Cur坐标系下的 p_start=R*p_cur+t
-        // R和t是在Cur坐标系下的
-        // 而imuAngularFromStart是在start坐标系下的，所以需要加负号
+        // transformCur应该指的是from start to current,而imuAngularFromStart指的是transform from current to start
         if (imuAngularFromStartX != 0 || imuAngularFromStartY != 0 || imuAngularFromStartZ != 0){
             transformCur[0] = - imuAngularFromStartY;
             transformCur[1] = - imuAngularFromStartZ;
@@ -1990,18 +1990,16 @@ public:
             return;
         }
 
-        // 主要进行的处理是将点云数据进行坐标变换，进行插补等工作
+        // 通过imu计算每个点对应时刻lidar 和初始时刻的相对pose，然后将点转换到初始时刻坐标系中去
         adjustDistortion();
 
-        // 不完全按照公式进行光滑性计算，并保存结果
+        // 计算每个点的曲率
         calculateSmoothness();
 
-        // 标记阻塞点??? 阻塞点是什么点???
-        // 参考了csdn若愚maimai大佬的博客，这里的阻塞点指过近的点
-        // 指在点云中可能出现的互相遮挡的情况
+        // 标记容易被遮挡的点
         markOccludedPoints();
 
-        // 特征抽取，然后分别保存到cornerPointsSharp等等队列中去
+        // 使用滑动窗口在每一scan上提取特征点，然后分别保存到cornerPointsSharp等等队列中去
         // 保存到不同的队列是不同类型的点云，进行了标记的工作，
         // 这一步中减少了点云数量，使计算量减少
         extractFeatures();
