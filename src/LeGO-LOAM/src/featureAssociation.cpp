@@ -161,7 +161,7 @@ private:
 
     pcl::PointCloud<PointType>::Ptr laserCloudCornerLast;
     pcl::PointCloud<PointType>::Ptr laserCloudSurfLast;
-    pcl::PointCloud<PointType>::Ptr laserCloudOri;
+    pcl::PointCloud<PointType>::Ptr laserCloudOri;//成功找到了最近三个点的点
     pcl::PointCloud<PointType>::Ptr coeffSel;
 
     pcl::KdTreeFLANN<PointType>::Ptr kdtreeCornerLast;
@@ -170,7 +170,7 @@ private:
     std::vector<int> pointSearchInd;
     std::vector<float> pointSearchSqDis;
 
-    PointType pointOri, pointSel/*当前点*/, tripod1, tripod2, tripod3, pointProj, coeff;
+    PointType pointOri, pointSel/*当前点*/, tripod1, tripod2, tripod3/*某点找到的最近的三个点*/, pointProj, coeff;
 
     nav_msgs::Odometry laserOdometry;
 
@@ -1262,9 +1262,9 @@ public:
         for (int i = 0; i < surfPointsFlatNum; i++) {
             // 将点的坐标转换到初始时刻坐标系中去
             TransformToStart(&surfPointsFlat->points[i], &pointSel);
-
+            // 每5次搜索一次每个点最近的3个点（不包含scan线距离太远的）
             if (iterCount % 5 == 0) {
-
+                
                 // 最近邻搜索k个点，这里k=1
                 kdtreeSurfLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
                 int closestPointInd = -1, minPointInd2 = -1, minPointInd3 = -1;
@@ -1275,14 +1275,13 @@ public:
                 if (pointSearchSqDis[0] < nearestFeatureSearchSqDist) {
                     closestPointInd = pointSearchInd[0];
 					
-                    // point.intensity 保存的是什么值??? 第几次scan?
                     // thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
                     // fullInfoCloud->points[index].intensity = range;
                     // 在imageProjection.cpp文件中有上述两行代码，两种类型的值，应该存的是上面一个
                     int closestPointScan = int(laserCloudSurfLast->points[closestPointInd].intensity);
 
                     // 主要功能是找到2个scan之内的最近点，并将找到的最近点及其序号保存
-                    // 之前扫描的保存到minPointSqDis2，之后的保存到minPointSqDis2
+                    // 之前扫描的保存到minPointSqDis2，之后的保存到minPointSqDis3
                     float pointSqDis, minPointSqDis2 = nearestFeatureSearchSqDist, minPointSqDis3 = nearestFeatureSearchSqDist;
                     for (int j = closestPointInd + 1; j < surfPointsFlatNum; j++) {
 
@@ -1352,13 +1351,18 @@ public:
                 tripod1 = laserCloudSurfLast->points[pointSearchSurfInd1[i]];
                 tripod2 = laserCloudSurfLast->points[pointSearchSurfInd2[i]];
                 tripod3 = laserCloudSurfLast->points[pointSearchSurfInd3[i]];
-
+                //向量AB = (tripod2.x - tripod1.x, tripod2.y - tripod1.y, tripod2.z - tripod1.z)
+                //向量AC = (tripod3.x - tripod1.x, tripod3.y - tripod1.y, tripod3.z - tripod1.z)
+                //AB×AC，得到平面的法向量
+                //叉乘公式：(x1,y1,z1)×(x2,y2,z2)=(y1z2-z1y2,z1x2-z1z2,z1y2-y1x1)
+                //法向量的ijk分量
                 float pa = (tripod2.y - tripod1.y) * (tripod3.z - tripod1.z) 
                          - (tripod3.y - tripod1.y) * (tripod2.z - tripod1.z);
                 float pb = (tripod2.z - tripod1.z) * (tripod3.x - tripod1.x) 
                          - (tripod3.z - tripod1.z) * (tripod2.x - tripod1.x);
                 float pc = (tripod2.x - tripod1.x) * (tripod3.y - tripod1.y) 
                          - (tripod3.x - tripod1.x) * (tripod2.y - tripod1.y);
+                
                 float pd = -(pa * tripod1.x + pb * tripod1.y + pc * tripod1.z);
 
                 float ps = sqrt(pa * pa + pb * pb + pc * pc);
@@ -1368,9 +1372,7 @@ public:
                 pc /= ps;
                 pd /= ps;
 
-                // 距离没有取绝对值
-                // 两个向量的点乘，分母除以ps中已经除掉了，
-                // 加pd原因:pointSel与tripod1构成的线段需要相减
+                //点到面的距离：向量OA与与法向量的点积除以法向量的模
                 float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
 
                 float s = 1;
@@ -1400,7 +1402,7 @@ public:
 
         int pointSelNum = laserCloudOri->points.size();
 
-        cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));
+        cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));//雅克比矩阵
         cv::Mat matAt(3, pointSelNum, CV_32F, cv::Scalar::all(0));
         cv::Mat matAtA(3, 3, CV_32F, cv::Scalar::all(0));
         cv::Mat matB(pointSelNum, 1, CV_32F, cv::Scalar::all(0));
@@ -1822,7 +1824,7 @@ public:
             // 然后计算协方差矩阵，保存在coeffSel队列中
             // laserCloudOri中保存的是对应于coeffSel的未转换到开始时刻的原始点云数据
             findCorrespondingSurfFeatures(iterCount1);
-
+            // 能找到最近三个点的点太少
             if (laserCloudOri->points.size() < 10)
                 continue;
             // 通过面特征的匹配，计算变换矩阵
