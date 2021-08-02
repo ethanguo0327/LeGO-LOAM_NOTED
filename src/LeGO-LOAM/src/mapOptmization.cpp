@@ -994,7 +994,7 @@ public:
                     recentSurfCloudKeyFrames.   pop_front();
                     recentOutlierCloudKeyFrames.pop_front();
                     // 为什么要把recentCornerCloudKeyFrames最前面第一个元素弹出?
-                    // (1个而不是好几个或者是全部)?
+                    // (1个而不是好几个或者是全部)?---因为后面要再往里push back了，recentCornerCloudKeyFrames的大小固定了：surroundingKeyframeSearchNum
                     
                     latestFrameID = cloudKeyPoses3D->points.size() - 1;
                     PointTypePose thisTransformation = cloudKeyPoses6D->points[latestFrameID];
@@ -1006,7 +1006,7 @@ public:
             }
 
             for (int i = 0; i < recentCornerCloudKeyFrames.size(); ++i){
-                // 两个pcl::PointXYZI相加?
+                // 两个pcl::PointXYZI相加?---不是相加，这是指针相加，把点云放一块了
                 // 注意这里把recentOutlierCloudKeyFrames也加入到了laserCloudSurfFromMap
                 *laserCloudCornerFromMap += *recentCornerCloudKeyFrames[i];
                 *laserCloudSurfFromMap   += *recentSurfCloudKeyFrames[i];

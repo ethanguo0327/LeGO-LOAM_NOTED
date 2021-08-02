@@ -153,7 +153,7 @@ private:
     float pointSearchSurfInd3[N_SCAN*Horizon_SCAN];
 
     float transformCur[6];//InitialGuess
-    float transformSum[6];
+    float transformSum[6];//odometry
 
     float imuRollLast, imuPitchLast, imuYawLast;
     float imuShiftFromStartX, imuShiftFromStartY, imuShiftFromStartZ;

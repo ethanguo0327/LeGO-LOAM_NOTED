@@ -45,7 +45,7 @@ private:
     ros::Publisher pubSegmentedCloudInfo;
     ros::Publisher pubOutlierCloud;
 
-    pcl::PointCloud<PointType>::Ptr laserCloudIn;
+    pcl::PointCloud<PointType>::Ptr laserCloudIn;//激光雷达msg转换而来的pcl格式点云
 
     pcl::PointCloud<PointType>::Ptr fullCloud;
     pcl::PointCloud<PointType>::Ptr fullInfoCloud;
@@ -180,18 +180,11 @@ public:
         // 雷达内部旋转扫描方向：Z轴俯视下来，顺时针方向（Z轴右手定则反向）
 
         // atan2(y,x)函数的返回值范围(-PI,PI],表示与复数x+yi的幅角
-        // segMsg.startOrientation范围为(-PI,PI]
-        // segMsg.endOrientation范围为(PI,3PI]
         // 因为，正常的-pi到pi是逆时针的，但velodyne是顺时针的，为了按照点生成顺序角度递增，加个符号使得-pi到pi是顺时针的
         segMsg.startOrientation = -atan2(laserCloudIn->points[0].y, laserCloudIn->points[0].x);
         // 下面这句话怀疑作者可能写错了，laserCloudIn->points.size() - 2应该是laserCloudIn->points.size() - 1
-        // 为啥加个2pi啊？两个作用：
-        // 1.loam认为雷达扫点的范围至少覆盖了半个圈
-        // 假设，起始点角度为-0.9pi
-        //      1.转了不止一整圈，如终点角度为-0.8pi，那么delta angle = -0.8pi - (-0.9pi)=0.1pi,显然不对，终点加个2pi可以解决：2.1pi
-        // 2.处理跨越零点带来的问题
-        //      2.转了不到一整圈，如终点角度为-0.99pi，那么delta angle = -0.99pi - (-0.9pi)=-0.09pi,显然不对，应该是另外一块圆弧，终点加个2pi可以解决：1.91pi
-        // 2pi的作用，跨零点时处理用于弥补跨零点问题，不跨零点时用于确保至少转了半圈。
+        // 为啥加个2pi啊？
+        // 防止终点跨零点（但这样又影响了不跨零点的时候）
         segMsg.endOrientation   = -atan2(laserCloudIn->points[laserCloudIn->points.size() - 1].y,
                                                      laserCloudIn->points[laserCloudIn->points.size() - 2].x) + 2 * M_PI;
 
@@ -201,7 +194,7 @@ public:
         // 上面+2pi的时候没做区分，正常情况下会无端多出2pi，因此要减掉
             segMsg.endOrientation -= 2 * M_PI;
         } else if (segMsg.endOrientation - segMsg.startOrientation < M_PI)
-        // 为什么又加了2pi？如果发生了跨零点问题，那么之前加的2pi被用于修复该问题了，那么如果还同时发生了看起来转了不到半圈的问题，那么还得再+2pi
+        // 为什么又加了2pi？如果发生了跨零点问题，那么之前加的2pi被用于修复该问题了，那么如果还同时发生了看起来转了不到半圈的问题，那么还得再+2pi，因为loam认为至少转了半圈
         // 例如：start：0.9pi，end：-0.9pi，跨零点的问题被上一个+2pi的步骤修复了：-0.9+2-0.9=0.2pi，但我们设定lidar至少转了半圈，说明其实是转了一圈单0.2pi
             segMsg.endOrientation += 2 * M_PI;
 
