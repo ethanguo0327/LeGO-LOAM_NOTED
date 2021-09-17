@@ -777,7 +777,7 @@ public:
 
             for (int j = 0; j < 6; j++) {
 
-                // sp和ep的含义是什么?其实相当于一个滑动窗口
+                // sp和ep的含义是什么?其实相当于把一帧scan分六份
                 int sp = (segInfo.startRingIndex[i] * (6 - j)    + segInfo.endRingIndex[i] * j) / 6;
                 int ep = (segInfo.startRingIndex[i] * (5 - j)    + segInfo.endRingIndex[i] * (j + 1)) / 6 - 1;
                 // 当窗口起点+滑动距离超过终点时，就不滑了
@@ -1257,7 +1257,7 @@ public:
 
     void findCorrespondingSurfFeatures(int iterCount){
 
-        int surfPointsFlatNum = surfPointsFlat->points.size();
+        int surfPointsFlatNum = surfPointsFlat->points.size();//注意，此时的surfPointsFlat已经是上一帧点云了
 
         for (int i = 0; i < surfPointsFlatNum; i++) {
             // 将点的坐标转换到初始时刻坐标系中去
@@ -1401,7 +1401,7 @@ public:
     bool calculateTransformationSurf(int iterCount){
 
         int pointSelNum = laserCloudOri->points.size();
-
+        // 其实有ceres可以用，大可不必手推雅克比
         cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));//雅克比矩阵
         cv::Mat matAt(3, pointSelNum, CV_32F, cv::Scalar::all(0));
         cv::Mat matAtA(3, 3, CV_32F, cv::Scalar::all(0));
@@ -1452,12 +1452,12 @@ public:
             matA.at<float>(i, 2) = aty;
             matB.at<float>(i, 0) = -0.05 * d2;
         }
-
+        //计算 δT
         cv::transpose(matA, matAt);
         matAtA = matAt * matA;
         matAtB = matAt * matB;
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
-
+        //看场景是否退化
         if (iterCount == 0) {
             cv::Mat matE(1, 3, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(3, 3, CV_32F, cv::Scalar::all(0));

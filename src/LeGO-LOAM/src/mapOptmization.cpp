@@ -95,7 +95,7 @@ private:
     deque<pcl::PointCloud<PointType>::Ptr> surroundingOutlierCloudKeyFrames;
     
     PointType previousRobotPosPoint;
-    PointType currentRobotPosPoint;
+    PointType currentRobotPosPoint;//current pose
 
     // PointType(pcl::PointXYZI)的XYZI分别保存3个方向上的平移和一个索引(cloudKeyPoses3D->points.size())
     pcl::PointCloud<PointType>::Ptr cloudKeyPoses3D;
@@ -179,9 +179,9 @@ private:
     float transformIncre[6];
 
     /*************低频转换量*************/
-    // 以起始位置为原点的世界坐标系下的转换矩阵（猜测与调整的对象）
+    // 基于上次位姿和delta odom预估的pose
     float transformTobeMapped[6];
-    // 存放mapping之前的Odometry计算的世界坐标系的转换矩阵（注：低频量，不一定与transformSum一样）
+    // 记录的上一次的里程计值，存它是为了计算delta odom
     float transformBefMapped[6];
     // 存放mapping之后的经过mapping微调之后的转换矩阵
     float transformAftMapped[6];
@@ -1029,15 +1029,16 @@ public:
 			kdtreeSurroundingKeyPoses->radiusSearch(currentRobotPosPoint, (double)surroundingKeyframeSearchRadius, pointSearchInd, pointSearchSqDis, 0);
 			for (int i = 0; i < pointSearchInd.size(); ++i)
                 surroundingKeyPoses->points.push_back(cloudKeyPoses3D->points[pointSearchInd[i]]);
+            // 体素滤波
 			downSizeFilterSurroundingKeyPoses.setInputCloud(surroundingKeyPoses);
 			downSizeFilterSurroundingKeyPoses.filter(*surroundingKeyPosesDS);
 
             int numSurroundingPosesDS = surroundingKeyPosesDS->points.size();
+            // 告诉surroundingExistingKeyPosesID里的每个成员，如果新找到的附近pose们，即surroundingKeyPosesDS中没有你，那么你就该淘汰了
             for (int i = 0; i < surroundingExistingKeyPosesID.size(); ++i){
                 bool existingFlag = false;
                 for (int j = 0; j < numSurroundingPosesDS; ++j){
-                    // 双重循环，不断对比surroundingExistingKeyPosesID[i]和surroundingKeyPosesDS的点的index
-                    // 如果能够找到一样的，说明存在相同的关键点(因为surroundingKeyPosesDS从cloudKeyPoses3D中筛选而来)
+
                     if (surroundingExistingKeyPosesID[i] == (int)surroundingKeyPosesDS->points[j].intensity){
                         existingFlag = true;
                         break;
@@ -1045,9 +1046,7 @@ public:
                 }
 				
                 if (existingFlag == false){
-                    // 如果surroundingExistingKeyPosesID[i]对比了一轮的已经存在的关键位姿的索引后（intensity保存的就是size()）
-                    // 没有找到相同的关键点，那么把这个点从当前队列中删除
-                    // 否则的话，existingFlag为true，该关键点就将它留在队列中
+
                     surroundingExistingKeyPosesID.   erase(surroundingExistingKeyPosesID.   begin() + i);
                     surroundingCornerCloudKeyFrames. erase(surroundingCornerCloudKeyFrames. begin() + i);
                     surroundingSurfCloudKeyFrames.   erase(surroundingSurfCloudKeyFrames.   begin() + i);
@@ -1056,13 +1055,10 @@ public:
                 }
             }
 
-            // 上一个两重for循环主要用于删除数据，此处的两重for循环用来添加数据
+            // 新成员加入到surroundingExistingKeyPosesID中去
             for (int i = 0; i < numSurroundingPosesDS; ++i) {
                 bool existingFlag = false;
                 for (auto iter = surroundingExistingKeyPosesID.begin(); iter != surroundingExistingKeyPosesID.end(); ++iter){
-                    // *iter就是不同的cloudKeyPoses3D->points.size(),
-                    // 把surroundingExistingKeyPosesID内没有对应的点放进一个队列里
-                    // 这个队列专门存放周围存在的关键帧，但是和surroundingExistingKeyPosesID的点没有对应的，也就是新的点
                     if ((*iter) == (int)surroundingKeyPosesDS->points[i].intensity){
                         existingFlag = true;
                         break;
@@ -1080,7 +1076,7 @@ public:
                     surroundingOutlierCloudKeyFrames.push_back(transformPointCloud(outlierCloudKeyFrames[thisKeyInd]));
                 }
             }
-
+            // 这些附近pose携带的点云
             for (int i = 0; i < surroundingExistingKeyPosesID.size(); ++i) {
                 *laserCloudCornerFromMap += *surroundingCornerCloudKeyFrames[i];
                 *laserCloudSurfFromMap   += *surroundingSurfCloudKeyFrames[i];
@@ -1128,6 +1124,7 @@ public:
     void cornerOptimization(int iterCount){
 
         updatePointAssociateToMapSinCos();
+        // laserCloudCornerLastDSNum 当前帧的点个数
         for (int i = 0; i < laserCloudCornerLastDSNum; i++) {
             pointOri = laserCloudCornerLastDS->points[i];
             
@@ -1145,7 +1142,7 @@ public:
             // 只有当最远的那个邻域点的距离pointSearchSqDis[4]小于1m时才进行下面的计算
             // 以下部分的计算是在计算点集的协方差矩阵，Zhang Ji的论文中有提到这部分
             if (pointSearchSqDis[4] < 1.0) {
-                // 先求5个样本的平均值
+                // 先求这5个点的平均值
                 float cx = 0, cy = 0, cz = 0;
                 for (int j = 0; j < 5; j++) {
                     cx += laserCloudCornerFromMapDS->points[pointSearchInd[j]].x;
@@ -1268,6 +1265,13 @@ public:
                 // matX0是3x1的矩阵
                 // 求解方程matA0*matX0=matB0
                 // 公式其实是在求由matA0中的点构成的平面的法向量matX0
+                // 点到平面的超定方程组
+                // ax0+by0+cz0+1=0
+                // ax1+by1+cz1+1=0
+                // ax2+by2+cz2+1=0
+                // ax3+by3+cz3+1=0
+                // ax4+by4+cz4+1=0
+                // ...
                 cv::solve(matA0, matB0, matX0, cv::DECOMP_QR);
 
                 // [pa,pb,pc,pd]=[matX0,pd]
@@ -1288,6 +1292,7 @@ public:
                 // 求解后再次检查平面是否是有效平面
                 bool planeValid = true;
                 for (int j = 0; j < 5; j++) {
+                    // 是否有点距离拟合出来的这个平面太远
                     if (fabs(pa * laserCloudSurfFromMapDS->points[pointSearchInd[j]].x +
                              pb * laserCloudSurfFromMapDS->points[pointSearchInd[j]].y +
                              pc * laserCloudSurfFromMapDS->points[pointSearchInd[j]].z + pd) > 0.2) {
@@ -1297,6 +1302,7 @@ public:
                 }
 
                 if (planeValid) {
+                    // 选中点到平面的距离
                     float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
 
                     // 后面部分相除求的是[pa,pb,pc,pd]与pointSel的夹角余弦值(两个sqrt，其实并不是余弦值)
@@ -1647,11 +1653,12 @@ public:
             if (timeLaserOdometry - timeLastProcessing >= mappingProcessInterval) {
 
                 timeLastProcessing = timeLaserOdometry;
-
+                // 更新transformTobeMapped
                 transformAssociateToMap();
 
                 extractSurroundingKeyFrames();
 
+                // 降采样laserCloudCornerLast
                 downsampleCurrentScan();
 
                 // 当前扫描进行边缘优化，图优化以及进行LM优化的过程
