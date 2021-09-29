@@ -1477,7 +1477,7 @@ public:
                 // 用for循环控制迭代次数，最多迭代10次
                 laserCloudOri->clear();
                 coeffSel->clear();
-
+                // 名字带optimization，但是并没有优化，只是建立优化约束
                 cornerOptimization(iterCount);
                 surfOptimization(iterCount);
 
@@ -1497,6 +1497,7 @@ public:
         currentRobotPosPoint.y = transformAftMapped[4];
         currentRobotPosPoint.z = transformAftMapped[5];
 
+        // motion filter
         bool saveThisKeyFrame = true;
         if (sqrt((previousRobotPosPoint.x-currentRobotPosPoint.x)*(previousRobotPosPoint.x-currentRobotPosPoint.x)
                 +(previousRobotPosPoint.y-currentRobotPosPoint.y)*(previousRobotPosPoint.y-currentRobotPosPoint.y)
@@ -1661,7 +1662,7 @@ public:
                 // 降采样laserCloudCornerLast
                 downsampleCurrentScan();
 
-                // 当前扫描进行边缘优化，图优化以及进行LM优化的过程
+                // scan to map优化
                 scan2MapOptimization();
 
                 saveKeyFramesAndFactor();
