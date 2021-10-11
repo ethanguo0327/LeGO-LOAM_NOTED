@@ -806,6 +806,7 @@ public:
 
         std::vector<int> pointSearchIndLoop;
         std::vector<float> pointSearchSqDisLoop;
+        //cloudKeyPoses3D都是一个个的keyframe的pose
         kdtreeHistoryKeyPoses->setInputCloud(cloudKeyPoses3D);
         // 进行半径historyKeyframeSearchRadius内的邻域搜索，
         // currentRobotPosPoint：需要查询的点，
